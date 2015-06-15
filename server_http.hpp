@@ -118,6 +118,8 @@ namespace SimpleWeb {
         public:
             std::string method, path, http_version;
 
+            boost::asio::ip::tcp::endpoint endpoint;
+
             std::istream content;
 
             std::unordered_map<std::string, std::string> header;
@@ -231,6 +233,13 @@ namespace SimpleWeb {
             //Create new streambuf (Request::streambuf) for async_read_until()
             //shared_ptr is used to pass temporary objects to the asynchronous functions
             std::shared_ptr<Request> request(new Request());
+
+            boost::system::error_code ec;
+            request->endpoint=socket->remote_endpoint(ec);
+            if(ec) {
+                std::cerr << ec.message() << std::endl;
+                return;
+            }
 
             //Set timeout on the following boost::asio::async-read or write function
             std::shared_ptr<boost::asio::deadline_timer> timer;
