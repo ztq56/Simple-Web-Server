@@ -230,17 +230,11 @@ namespace SimpleWeb {
             return timer;
         }  
         
-        void read_request_and_content(std::shared_ptr<socket_type> socket) {
+        void read_request_and_content(std::shared_ptr<socket_type> socket, boost::asio::ip::tcp::endpoint& endpoint) {
             //Create new streambuf (Request::streambuf) for async_read_until()
             //shared_ptr is used to pass temporary objects to the asynchronous functions
             std::shared_ptr<Request> request(new Request());
-
-            boost::system::error_code ec;
-            request->endpoint=socket->remote_endpoint(ec);
-            if(ec) {
-                std::cerr << ec.message() << std::endl;
-                return;
-            }
+            request->endpoint=endpoint;
 
             //Set timeout on the following boost::asio::async-read or write function
             std::shared_ptr<boost::asio::deadline_timer> timer;
@@ -355,7 +349,7 @@ namespace SimpleWeb {
                     if(timeout_content>0)
                         timer->cancel();
                     if(!ec && stof(request->http_version)>1.05)
-                        read_request_and_content(socket);
+                        read_request_and_content(socket, request->endpoint);
                 });
             });
         }
@@ -386,7 +380,14 @@ namespace SimpleWeb {
                     boost::asio::ip::tcp::no_delay option(true);
                     socket->set_option(option);
                     
-                    read_request_and_content(socket);
+                    boost::system::error_code ec2;
+                    boost::asio::ip::tcp::endpoint endpoint=socket->remote_endpoint(ec2);
+                    if(ec2) {
+                        std::cerr << ec2.message() << std::endl;
+                        return;
+                    }
+
+                    read_request_and_content(socket, endpoint);
                 }
             });
         }

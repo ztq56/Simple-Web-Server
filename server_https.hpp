@@ -46,8 +46,16 @@ namespace SimpleWeb {
                             (const boost::system::error_code& ec) {
                         if(timeout_request>0)
                             timer->cancel();
-                        if(!ec)
-                            read_request_and_content(socket);
+                        if(!ec) {
+                            boost::system::error_code ec2;
+                            boost::asio::ip::tcp::endpoint endpoint=socket->lowest_layer().remote_endpoint(ec2);
+                            if(ec2) {
+                                std::cerr << ec2.message() << std::endl;
+                                return;
+                            }
+
+                            read_request_and_content(socket, endpoint);
+                        }
                     });
                 }
             });
