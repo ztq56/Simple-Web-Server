@@ -16,6 +16,29 @@ using namespace boost::property_tree;
 typedef SimpleWeb::Server<SimpleWeb::HTTPS> HttpsServer;
 typedef SimpleWeb::Client<SimpleWeb::HTTPS> HttpsClient;
 
+
+class http_status // injects http response header
+{
+    int _status;
+public:
+    explicit http_status(int status): _status(status) {}
+    std::size_t get_status() const {return _status;}
+    template<class Response>
+    friend Response& operator<<(Response& os, const http_status& obj)
+    {
+        switch(obj.get_status()) {
+            case 200: os << "HTTP/1.1 200 OK\r\n"; break;
+            case 400: os << "HTTP/1.1 400 Bad request\r\n"; break;
+            case 401: os << "HTTP/1.1 401 Unauthorized\r\n";break;
+            case 403: os << "HTTP/1.1 403 Forbidden\r\n"; break;
+            case 404: os << "HTTP/1.1 404 Not found\r\n"; break;
+            default: os << "HTTP/1.1 " << obj.get_status() << "\r\n"; break;
+        }
+        return os;
+    }
+};
+
+
 template<class Response>
 bool send_file(Response& response, const std::string& root_dir, const std::string& http_path, int status=200) {
     boost::system::error_code ec;
@@ -73,7 +96,7 @@ bool send_file(Response& response, const std::string& root_dir, const std::strin
     if(it!=content_types.end())
         content_type=it->second;
     size_t length=boost::filesystem::file_size(real_path);
-    response << "HTTP/1.1 " << status << "\r\n" << content_type << "Content-Length: " << length << "\r\n\r\n";
+    response << http_status(status) << content_type << "Content-Length: " << length << "\r\n\r\n";
 
     //read and send 128 KB at a time if file-size>buffer_size
     size_t buffer_size=131072;
@@ -102,7 +125,7 @@ int main() {
         request->content >> ss.rdbuf();
         string content=ss.str();
         
-        response << "HTTP/1.1 200 OK\r\nContent-Length: " << content.length() << "\r\n\r\n" << content;
+        response << http_status(200) << "Content-Length: " << content.length() << "\r\n\r\n" << content;
     };
     
     //POST-example for the path /json, responds firstName+" "+lastName from the posted json
@@ -120,10 +143,10 @@ int main() {
 
             string name=pt.get<string>("firstName")+" "+pt.get<string>("lastName");
             
-            response << "HTTP/1.1 200 OK\r\nContent-Length: " << name.length() << "\r\n\r\n" << name;
+            response << http_status(200) << "Content-Length: " << name.length() << "\r\n\r\n" << name;
         }
         catch(exception& e) {
-            response << "HTTP/1.1 400 Bad Request\r\nContent-Length: " << strlen(e.what()) << "\r\n\r\n" << e.what();
+            response << http_status(400) << "Content-Length: " << strlen(e.what()) << "\r\n\r\n" << e.what();
         }
     };
     
@@ -140,14 +163,14 @@ int main() {
         //find length of content_stream (length received using content_stream.tellp())
         content_stream.seekp(0, ios::end);
         
-        response <<  "HTTP/1.1 200 OK\r\nContent-Length: " << content_stream.tellp() << "\r\n\r\n" << content_stream.rdbuf();
+        response << http_status(200) << "Content-Length: " << content_stream.tellp() << "\r\n\r\n" << content_stream.rdbuf();
     };
     
     //GET-example for the path /match/[number], responds with the matched string in path (number)
     //For instance a request GET /match/123 will receive: 123
     server.resource["^/match/([0-9]+)$"]["GET"]=[](HttpsServer::Response& response, shared_ptr<HttpsServer::Request> request) {
         string number=request->path_match[1];
-        response << "HTTP/1.1 200 OK\r\nContent-Length: " << number.length() << "\r\n\r\n" << number;
+        response << http_status(200) << "Content-Length: " << number.length() << "\r\n\r\n" << number;
     };
     
     //Default GET-example. If no other matches, this anonymous function will be called. 
@@ -158,7 +181,7 @@ int main() {
         string http_path=(request->path=="/") ? "/index.html":request->path;
         if(!send_file(response, "web", http_path) && !send_file(response, "web", "/404.html", 404)) {
             std::string content="\"" + http_path + "\" not found";
-            response << "HTTP/1.1 404 Not found\r\nContent-type: text/plain\r\nContent-Length: " <<
+            response << http_status(404) << "Content-type: text/plain\r\nContent-Length: " <<
                         content.length() << "\r\n\r\n" << content;
         }
     };
