@@ -34,6 +34,7 @@ namespace SimpleWeb {
                     strand(strand), yield(yield), socket(socket), async_timer(new boost::asio::deadline_timer(io_service)), 
                     async_writing(new bool(false)), async_waiting(new bool(false)), stream(&streambuf) {}
 
+        public:
             void async_flush(std::function<void(const boost::system::error_code&)> callback=nullptr) {
                 if(!callback && !socket->lowest_layer().is_open()) {
                     if(*async_waiting)
@@ -84,7 +85,6 @@ namespace SimpleWeb {
                 boost::asio::async_write(*socket, write_buffer, yield);
             }
                         
-        public:
             std::ostream stream;
             
             template <class T>

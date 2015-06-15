@@ -6,6 +6,10 @@
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 
+#include <boost/filesystem.hpp>
+#include <boost/filesystem/fstream.hpp>
+
+
 //Added for the default_resource example
 #include<fstream>
 
@@ -15,6 +19,82 @@ using namespace boost::property_tree;
 
 typedef SimpleWeb::Server<SimpleWeb::HTTP> HttpServer;
 typedef SimpleWeb::Client<SimpleWeb::HTTP> HttpClient;
+
+
+template<class Response>
+bool send_file(Response& response, const std::string& root_dir, const std::string& http_path, int status=200) {
+    boost::system::error_code ec;
+    boost::filesystem::path real_path = boost::filesystem::canonical(boost::filesystem::path(root_dir), ec);
+    if(ec)
+    {
+        std::cerr << "Invalid web root directory \"" << root_dir << "\" : " << ec.message() << std::endl;
+        return false;
+    }
+
+    boost::filesystem::path req_path(http_path);
+    for(auto it=req_path.begin(); it!=req_path.end();++it) {
+        if(*it=="." || *it=="/")
+            continue;
+        if(*it=="..") {
+            std::cerr << "\"..\" not allowed in path " << req_path << std::endl;
+            return false;
+        }
+        real_path/=*it;
+        if(!boost::filesystem::exists(real_path)) {
+            std::cerr << "Invalid path " << real_path << std::endl;
+            return false;
+        }
+        if(boost::filesystem::is_symlink(real_path)) {
+            std::cerr << "Symlink " << real_path << " not allowed" << std::endl;
+            return false;
+        }
+    }
+
+    if(!boost::filesystem::is_regular_file(real_path)) {
+        std::cerr << real_path << " is not a file" << std::endl;
+        return false;
+    }
+
+    boost::filesystem::ifstream ifs(real_path, std::ios::binary);
+    if(!ifs) {
+        std::cerr << "Failed opening file " << real_path << std::endl;
+        return false;
+    }
+
+    static std::unordered_map<std::string, std::string> content_types= {
+        {".txt", "Content-Type: text/plain\r\n"},
+        {".png", "Content-Type: image/png\r\n"},
+        {".jpg", "Content-Type: image/jpeg\r\n"},
+        {".jpeg", "Content-Type: image/jpeg\r\n"},
+        {".gif", "Content-Type: image/gif\r\n"},
+        {".css", "Content-Type: text/css\r\n"},
+        {".html", "Content-Type: text/html\r\n"},
+        {".pdf", "Content-Type: application/pdf\r\n"},
+        {".json", "Content-Type: application/json\r\n"}
+    };
+
+    std::string content_type;
+    const auto it=content_types.find(boost::filesystem::extension(real_path));
+    if(it!=content_types.end())
+        content_type=it->second;
+    size_t length=boost::filesystem::file_size(real_path);
+    response << "HTTP/1.1 " << status << "\r\n" << content_type << "Content-Length: " << length << "\r\n\r\n";
+
+    //read and send 128 KB at a time if file-size>buffer_size
+    size_t buffer_size=131072;
+    if(length>buffer_size) {
+        std::vector<char> buffer(buffer_size);
+        size_t read_length;
+        while((read_length=ifs.read(&buffer[0], buffer_size).gcount())>0) {
+            response.stream.write(&buffer[0], read_length);
+            response.flush();
+        }
+    }
+    else
+        response << ifs.rdbuf();
+    return true;
+}
+
 
 int main() {
     //HTTP-server at port 8080 using 4 threads
@@ -81,52 +161,11 @@ int main() {
     //Default file: index.html
     //Can for instance be used to retrieve an HTML 5 client that uses REST-resources on this server
     server.default_resource["GET"]=[](HttpServer::Response& response, shared_ptr<HttpServer::Request> request) {
-        string filename="web";
-        
-        string path=request->path;
-        
-        //Replace all ".." with "." (so we can't leave the web-directory)
-        size_t pos;
-        while((pos=path.find(".."))!=string::npos) {
-            path.erase(pos, 1);
-        }
-        
-        filename+=path;
-        ifstream ifs;
-        //A simple platform-independent file-or-directory check do not exist, but this works in most of the cases:
-        if(filename.find('.')==string::npos) {
-            if(filename[filename.length()-1]!='/')
-                filename+='/';
-            filename+="index.html";
-        }
-        ifs.open(filename, ifstream::in);
-        
-        if(ifs) {
-            ifs.seekg(0, ios::end);
-            size_t length=ifs.tellg();
-            
-            ifs.seekg(0, ios::beg);
-
-            response << "HTTP/1.1 200 OK\r\nContent-Length: " << length << "\r\n\r\n";
-            
-            //read and send 128 KB at a time if file-size>buffer_size
-            size_t buffer_size=131072;
-            if(length>buffer_size) {
-                vector<char> buffer(buffer_size);
-                size_t read_length;
-                while((read_length=ifs.read(&buffer[0], buffer_size).gcount())>0) {
-                    response.stream.write(&buffer[0], read_length);
-                    response << HttpServer::flush;
-                }
-            }
-            else
-                response << ifs.rdbuf();
-
-            ifs.close();
-        }
-        else {
-            string content="Could not open file "+filename;
-            response << "HTTP/1.1 400 Bad Request\r\nContent-Length: " << content.length() << "\r\n\r\n" << content;
+        string http_path=(request->path=="/") ? "/index.html":request->path;
+        if(!send_file(response, "web", http_path) && !send_file(response, "web", "/404.html", 404)) {
+            std::string content="\"" + http_path + "\" not found";
+            response << "HTTP/1.1 404 Not found\r\nContent-type: text/plain\r\nContent-Length: " <<
+                        content.length() << "\r\n\r\n" << content;
         }
     };
     
@@ -151,7 +190,8 @@ int main() {
     ss.str(json);
     auto r3=client.request("POST", "/json", ss);
     cout << r3->content.rdbuf() << endl;
-        
+
+
     server_thread.join();
     
     return 0;
