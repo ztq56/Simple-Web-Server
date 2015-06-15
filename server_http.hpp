@@ -300,7 +300,9 @@ namespace SimpleWeb {
                     if(line[value_start]==' ')
                         value_start++;
 
-                    request->header[line.substr(0, param_end)]=line.substr(value_start, line.size()-value_start-1);
+                    std::string key=line.substr(0, param_end);
+                    std::transform(key.begin(), key.end(), key.begin(), ::tolower);
+                    request->header[key]=line.substr(value_start, line.size()-value_start-1);
 
                     getline(stream, line);
                     param_end=line.find(':');
